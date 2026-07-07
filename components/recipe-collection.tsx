@@ -99,6 +99,16 @@ function RecipeCard({
         aria-expanded={open}
         className="flex w-full items-center gap-4 px-5 py-5 text-left md:px-7"
       >
+        {recipe.imageUrl && (
+          <div className="hidden h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-border bg-background sm:block">
+            <img
+              src={recipe.imageUrl}
+              alt={`${recipe.title} photo`}
+              className="h-full w-full object-cover"
+              loading="lazy"
+            />
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground text-balance">

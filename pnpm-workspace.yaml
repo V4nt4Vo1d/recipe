@@ -1,5 +1,7 @@
 allowBuilds:
   sharp: true
+overrides:
+  hono: 4.12.25
 minimumReleaseAgeExclude:
   - '@supabase/auth-js@2.110.1'
   - '@supabase/functions-js@2.110.1'

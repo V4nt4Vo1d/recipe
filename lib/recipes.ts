@@ -11,6 +11,7 @@ export type Recipe = {
   title: string
   desc: string
   category: string
+  imageUrl?: string
   blocks: Block[]
 }
 

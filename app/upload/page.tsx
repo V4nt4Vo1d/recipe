@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import Link from 'next/link'
 import {
   ArrowRight,
   Check,
   ClipboardCopy,
   Download,
+  ImagePlus,
   Plus,
   UtensilsCrossed,
 } from 'lucide-react'
@@ -17,6 +18,7 @@ import {
   buildRecipeFromForm,
   recipeToSnippet,
   saveUserRecipe,
+  uploadRecipeImage,
   type RecipeFormInput,
   type UserRecipe,
 } from '@/lib/user-recipes'
@@ -35,10 +37,18 @@ const empty: RecipeFormInput = {
 const fieldClass =
   'w-full rounded-lg border border-border bg-card px-4 py-2.5 text-sm text-foreground shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20'
 
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
+
 export default function UploadPage() {
   const [form, setForm] = useState<RecipeFormInput>(empty)
   const [saved, setSaved] = useState<UserRecipe | null>(null)
   const [copied, setCopied] = useState(false)
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string>('')
+  const [submitError, setSubmitError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const imageInputRef = useRef<HTMLInputElement>(null)
 
   const targetFamily = familyList.find(
     (f) => f.slug === (saved ? saved.id.split('-')[0] : form.family),
@@ -51,16 +61,69 @@ export default function UploadPage() {
     form.family.trim() !== '' &&
     form.title.trim() !== '' &&
     form.ingredients.trim() !== '' &&
-    form.instructions.trim() !== ''
+    form.instructions.trim() !== '' &&
+    !saving
+
+  const validateAndSetImage = (file: File | null) => {
+    if (!file) {
+      setImageFile(null)
+      setImagePreview('')
+      setSubmitError('')
+      return
+    }
+
+    if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+      setSubmitError('Please choose a JPG, PNG, WEBP, or GIF image.')
+      setImageFile(null)
+      setImagePreview('')
+      return
+    }
+
+    if (file.size > MAX_IMAGE_BYTES) {
+      setSubmitError('Please choose an image under 5MB.')
+      setImageFile(null)
+      setImagePreview('')
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      setImagePreview(typeof reader.result === 'string' ? reader.result : '')
+    }
+    reader.readAsDataURL(file)
+    setImageFile(file)
+    setSubmitError('')
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!canSubmit) return
-    const recipe = buildRecipeFromForm(form)
-    await saveUserRecipe(form.family, recipe)
-    setSaved(recipe)
-    setCopied(false)
-    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
+
+    setSaving(true)
+    setSubmitError('')
+    try {
+      const baseRecipe = buildRecipeFromForm(form)
+      let recipe: UserRecipe = baseRecipe
+
+      if (imageFile) {
+        const uploaded = await uploadRecipeImage(form.family, baseRecipe.id, imageFile)
+        recipe = {
+          ...baseRecipe,
+          imagePath: uploaded.path,
+          imageUrl: uploaded.url,
+        }
+      }
+
+      await saveUserRecipe(form.family, recipe)
+      setSaved(recipe)
+      setCopied(false)
+      if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to upload recipe right now.'
+      setSubmitError(message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleCopy = async () => {
@@ -88,6 +151,11 @@ export default function UploadPage() {
   const resetForm = () => {
     setForm(empty)
     setSaved(null)
+    setCopied(false)
+    setImageFile(null)
+    setImagePreview('')
+    setSubmitError('')
+    if (imageInputRef.current) imageInputRef.current.value = ''
   }
 
   return (
@@ -128,6 +196,16 @@ export default function UploadPage() {
                     It&apos;s now saved in this browser and showing on the{' '}
                     {targetFamily.name} page.
                   </p>
+                  {saved.imageUrl && (
+                    <div className="mt-4 overflow-hidden rounded-xl border border-border bg-background">
+                      <img
+                        src={saved.imageUrl}
+                        alt={`${saved.title} photo`}
+                        className="h-44 w-full object-cover"
+                        loading="lazy"
+                      />
+                    </div>
+                  )}
                   <div className="mt-4 flex flex-wrap gap-3">
                     <Link
                       href={`/${targetFamily.slug}#${saved.id}`}
@@ -256,6 +334,32 @@ export default function UploadPage() {
                   />
                 </div>
               </div>
+
+              <div>
+                <label htmlFor="recipe-image" className="mb-1.5 block text-sm font-medium text-foreground">
+                  Recipe photo
+                </label>
+                <input
+                  ref={imageInputRef}
+                  id="recipe-image"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  onChange={(e) => validateAndSetImage(e.target.files?.[0] ?? null)}
+                  className={fieldClass}
+                />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Optional. JPG, PNG, WEBP, or GIF up to 5MB.
+                </p>
+                {imagePreview && (
+                  <div className="mt-3 overflow-hidden rounded-xl border border-border bg-card">
+                    <img
+                      src={imagePreview}
+                      alt="Selected preview"
+                      className="h-44 w-full object-cover"
+                    />
+                  </div>
+                )}
+              </div>
             </fieldset>
 
             <fieldset className="space-y-5">
@@ -321,14 +425,24 @@ export default function UploadPage() {
               </div>
             </fieldset>
 
+            {submitError && (
+              <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
+                {submitError}
+              </p>
+            )}
+
             <div className="flex items-center gap-4 border-t border-border/70 pt-6">
               <button
                 type="submit"
                 disabled={!canSubmit}
                 className="inline-flex items-center gap-2 rounded-full bg-primary px-7 py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
               >
-                <Plus className="size-4" aria-hidden="true" />
-                Add recipe
+                {saving ? (
+                  <ImagePlus className="size-4" aria-hidden="true" />
+                ) : (
+                  <Plus className="size-4" aria-hidden="true" />
+                )}
+                {saving ? 'Saving...' : 'Add recipe'}
               </button>
               <span className="text-xs text-muted-foreground">
                 <span className="text-primary">*</span> Required fields

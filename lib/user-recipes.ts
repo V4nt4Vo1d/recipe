@@ -6,8 +6,13 @@ import type { Block, Recipe } from '@/lib/recipes'
 // configured the site continues to work exactly as before.
 
 const KEY_PREFIX = 'family-recipes:'
+const IMAGE_BUCKET = 'recipe-images'
 
-export type UserRecipe = Recipe & { userAdded: true; createdAt: number }
+export type UserRecipe = Recipe & {
+  userAdded: true
+  createdAt: number
+  imagePath?: string
+}
 
 const CATEGORY_FALLBACK = 'Family Additions'
 
@@ -19,14 +24,16 @@ function keyFor(slug: string) {
 function supabaseReady(): boolean {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ''
-  // Accept both new publishable keys (sb_publishable_...) and legacy anon JWTs (eyJ...)
+  const cleanUrl = url.trim()
+  const cleanKey = key.trim()
+  const urlLooksReal =
+    cleanUrl.startsWith('https://') &&
+    !cleanUrl.includes('YOUR_SUPABASE_URL') &&
+    cleanUrl.length > 'https://x'.length
   const keyLooksReal =
-    (key.startsWith('sb_publishable_') || key.startsWith('eyJ')) && key.length > 20
-  return (
-    url.startsWith('https://') &&
-    url.includes('.supabase.co') &&
-    keyLooksReal
-  )
+    cleanKey.length > 20 &&
+    !cleanKey.includes('YOUR_KEY')
+  return urlLooksReal && keyLooksReal
 }
 
 // ── localStorage helpers (always available) ───────────────────────────────
@@ -34,6 +41,7 @@ function supabaseReady(): boolean {
 function localLoad(slug: string): UserRecipe[] {
   if (typeof window === 'undefined') return []
   try {
+    const canResolveImageUrl = supabaseReady()
     const raw = window.localStorage.getItem(keyFor(slug))
     if (!raw) return []
     const parsed = JSON.parse(raw)
@@ -41,6 +49,11 @@ function localLoad(slug: string): UserRecipe[] {
     return (parsed as UserRecipe[]).map((recipe) => ({
       ...recipe,
       category: normalizeCategory(recipe.category),
+      imageUrl:
+        recipe.imageUrl ||
+        (canResolveImageUrl && recipe.imagePath
+          ? publicUrlForImagePath(recipe.imagePath)
+          : undefined),
     }))
   } catch {
     return []
@@ -60,19 +73,24 @@ export async function loadUserRecipes(slug: string): Promise<UserRecipe[]> {
       const supabase = createClient()
       const { data, error } = await supabase
         .from('user_recipes')
-        .select('id, title, description, category, blocks, created_at')
+        .select('id, title, description, category, image_path, blocks, created_at')
         .eq('family_slug', slug)
         .order('created_at', { ascending: false })
       if (!error && data) {
-        return data.map((row: Record<string, unknown>) => ({
-          id: row.id as string,
-          title: row.title as string,
-          desc: (row.description ?? '') as string,
-          category: normalizeCategory((row.category ?? CATEGORY_FALLBACK) as string),
-          blocks: row.blocks as Block[],
-          userAdded: true as const,
-          createdAt: new Date(row.created_at as string).getTime(),
-        }))
+        return data.map((row: Record<string, unknown>) => {
+          const imagePath = (row.image_path ?? '') as string
+          return {
+            id: row.id as string,
+            title: row.title as string,
+            desc: (row.description ?? '') as string,
+            category: normalizeCategory((row.category ?? CATEGORY_FALLBACK) as string),
+            imageUrl: imagePath ? publicUrlForImagePath(imagePath) : undefined,
+            imagePath: imagePath || undefined,
+            blocks: row.blocks as Block[],
+            userAdded: true as const,
+            createdAt: new Date(row.created_at as string).getTime(),
+          }
+        })
       }
     } catch {
       // fall through to localStorage
@@ -94,6 +112,7 @@ export async function saveUserRecipe(slug: string, recipe: UserRecipe): Promise<
         title: recipe.title,
         description: recipe.desc,
         category: recipe.category,
+        image_path: recipe.imagePath ?? null,
         blocks: recipe.blocks,
         created_at: new Date(recipe.createdAt).toISOString(),
       })
@@ -104,15 +123,59 @@ export async function saveUserRecipe(slug: string, recipe: UserRecipe): Promise<
 }
 
 export async function deleteUserRecipe(slug: string, id: string): Promise<void> {
-  localSave(slug, localLoad(slug).filter((r) => r.id !== id))
+  const current = localLoad(slug)
+  const recipe = current.find((r) => r.id === id)
+  localSave(slug, current.filter((r) => r.id !== id))
 
   if (supabaseReady()) {
     try {
       const supabase = createClient()
+      if (recipe?.imagePath) {
+        await supabase.storage.from(IMAGE_BUCKET).remove([recipe.imagePath])
+      }
       await supabase.from('user_recipes').delete().eq('id', id)
     } catch {
       // already removed from localStorage
     }
+  }
+}
+
+function publicUrlForImagePath(path: string): string {
+  const supabase = createClient()
+  const { data } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(path)
+  return data.publicUrl
+}
+
+function extensionForFile(file: File): string {
+  const byName = file.name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1]
+  if (byName) return byName
+  if (file.type === 'image/png') return 'png'
+  if (file.type === 'image/webp') return 'webp'
+  if (file.type === 'image/gif') return 'gif'
+  return 'jpg'
+}
+
+export async function uploadRecipeImage(slug: string, recipeId: string, file: File): Promise<{ path: string; url: string }> {
+  if (!supabaseReady()) {
+    throw new Error('Image upload requires Supabase to be configured.')
+  }
+  const supabase = createClient()
+  const safeFamily = slugify(slug) || 'family'
+  const ext = extensionForFile(file)
+  const path = `${safeFamily}/${recipeId}-${Date.now().toString(36)}.${ext}`
+
+  const { error } = await supabase.storage.from(IMAGE_BUCKET).upload(path, file, {
+    cacheControl: '3600',
+    contentType: file.type || undefined,
+    upsert: false,
+  })
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return {
+    path,
+    url: publicUrlForImagePath(path),
   }
 }
 
@@ -225,6 +288,6 @@ export function buildRecipeFromForm(input: RecipeFormInput): UserRecipe {
 // Produces a clean JSON snippet the family can copy/download and send along
 // to be committed into lib/recipes.ts for everyone.
 export function recipeToSnippet(recipe: UserRecipe): string {
-  const { userAdded, createdAt, ...clean } = recipe
+  const { userAdded, createdAt, imagePath, ...clean } = recipe
   return JSON.stringify(clean, null, 2)
 }

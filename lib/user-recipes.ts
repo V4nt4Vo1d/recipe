@@ -9,6 +9,8 @@ const KEY_PREFIX = 'family-recipes:'
 
 export type UserRecipe = Recipe & { userAdded: true; createdAt: number }
 
+const CATEGORY_FALLBACK = 'Family Additions'
+
 function keyFor(slug: string) {
   return `${KEY_PREFIX}${slug}`
 }
@@ -35,7 +37,11 @@ function localLoad(slug: string): UserRecipe[] {
     const raw = window.localStorage.getItem(keyFor(slug))
     if (!raw) return []
     const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? (parsed as UserRecipe[]) : []
+    if (!Array.isArray(parsed)) return []
+    return (parsed as UserRecipe[]).map((recipe) => ({
+      ...recipe,
+      category: normalizeCategory(recipe.category),
+    }))
   } catch {
     return []
   }
@@ -62,7 +68,7 @@ export async function loadUserRecipes(slug: string): Promise<UserRecipe[]> {
           id: row.id as string,
           title: row.title as string,
           desc: (row.description ?? '') as string,
-          category: (row.category ?? 'Family Additions') as string,
+          category: normalizeCategory((row.category ?? CATEGORY_FALLBACK) as string),
           blocks: row.blocks as Block[],
           userAdded: true as const,
           createdAt: new Date(row.created_at as string).getTime(),
@@ -119,6 +125,46 @@ export function slugify(input: string): string {
     .slice(0, 60)
 }
 
+function normalizeCategory(input: string): string {
+  const raw = input.trim()
+  if (!raw) return CATEGORY_FALLBACK
+
+  const normalized = input
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  const dessertAliases = new Set([
+    'dessert',
+    'desserts',
+    'sweet',
+    'sweets',
+    'treat',
+    'treats',
+    'baked good',
+    'baked goods',
+  ])
+  if (dessertAliases.has(normalized)) return 'Desserts'
+
+  const mainAliases = new Set([
+    'main',
+    'mains',
+    'main dish',
+    'main dishes',
+    'entree',
+    'entrees',
+    'dinner',
+    'dinners',
+  ])
+  if (mainAliases.has(normalized)) return 'Main Dishes'
+
+  return raw
+}
+
 // Split a pasted block of text into clean, non-empty lines. Strips common
 // list markers like "-", "*", "1.", "1)" so pasted content looks tidy.
 export function linesFromText(text: string): string[] {
@@ -169,7 +215,7 @@ export function buildRecipeFromForm(input: RecipeFormInput): UserRecipe {
     id,
     title: input.title.trim(),
     desc: input.description.trim(),
-    category: input.category.trim() || 'Family Additions',
+    category: normalizeCategory(input.category),
     blocks,
     userAdded: true,
     createdAt: Date.now(),

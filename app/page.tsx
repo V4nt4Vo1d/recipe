@@ -37,7 +37,7 @@ export default function HomePage() {
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-3">
                 <Link
-                  href="/raifsnider"
+                  href="#family-collections"
                   className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-transform hover:-translate-y-0.5"
                 >
                   Browse the recipes
@@ -93,7 +93,7 @@ export default function HomePage() {
         </section>
 
         {/* Collections */}
-        <section className="mx-auto max-w-6xl px-5 py-16 md:px-8 md:py-24">
+        <section id="family-collections" className="mx-auto max-w-6xl px-5 py-16 md:px-8 md:py-24">
           <div className="max-w-xl">
             <span className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
               Start here

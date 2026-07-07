@@ -893,8 +893,29 @@ export const families: Record<string, Family> = {
     "name": "Ricketts Family",
     "short": "Ricketts",
     "blurb": "Chicken and noodles, hearty stews, and more collected from the Ricketts family.",
+    "recipes": []
+  },
+  "beavers": {
+    "slug": "beavers",
+    "name": "Beavers Family",
+    "short": "Beavers",
+    "blurb": "A growing collection of Beavers family favorites, added by the family.",
+    "recipes": []
+  },
+  "hoffer": {
+    "slug": "hoffer",
+    "name": "Hoffer Family",
+    "short": "Hoffer",
+    "blurb": "A growing collection of Hoffer family favorites, added by the family.",
+    "recipes": []
+  },
+  "love": {
+    "slug": "love",
+    "name": "Love Family",
+    "short": "Love",
+    "blurb": "A growing collection of Love family favorites, added by the family.",
     "recipes": [
-      {
+{
         "id": "ricketts-chicken-noodles",
         "title": "Chicken and Noodles",
         "desc": "Chicken breast simmered with egg noodles in a rich broth.",
@@ -1075,31 +1096,12 @@ export const families: Record<string, Family> = {
         ]
       }
     ]
-  },
-  "beavers": {
-    "slug": "beavers",
-    "name": "Beavers Family",
-    "short": "Beavers",
-    "blurb": "A growing collection of Beavers family favorites, added by the family.",
-    "recipes": []
-  },
-  "hoffer": {
-    "slug": "hoffer",
-    "name": "Hoffer Family",
-    "short": "Hoffer",
-    "blurb": "A growing collection of Hoffer family favorites, added by the family.",
-    "recipes": []
-  },
-  "love": {
-    "slug": "love",
-    "name": "Love Family",
-    "short": "Love",
-    "blurb": "A growing collection of Love family favorites, added by the family.",
-    "recipes": []
   }
 }
 
-export const familyList = Object.values(families)
+const familyOrder = ["raifsnider", "beavers", "hoffer", "ricketts", "love"] as const
+
+export const familyList = familyOrder.map((slug) => families[slug])
 
 export function getFamily(slug: string): Family | undefined {
   return families[slug]
